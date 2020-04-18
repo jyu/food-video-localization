@@ -156,17 +156,22 @@ def extract_feat_for_video(name):
     assert(scene_array.shape[0] == cnn_array.shape[0])
 
 
-# In[8]:
+# In[7]:
 
 
-extract_feat_for_video("2_Egg_Vs_95_Egg")
+#  extract_feat_for_video("2_Egg_Vs_95_Egg")
 
 
-# In[48]:
+# In[9]:
 
+
+processed = os.listdir('cnn')
 
 for label in os.listdir('labels'):
     name = label.replace(".json", "")
+    if name + ".feat" in processed:
+        continue
+        
     print(name)
     extract_feat_for_video(name)
 
