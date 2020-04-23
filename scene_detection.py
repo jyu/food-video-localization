@@ -155,7 +155,11 @@ def cross_validate_method(train_fn, params):
     k = 5
     random.shuffle(names)
     batches = len(names) // k
-
+    # save the cross validation videos
+    f = open('cross_val.txt', 'w')
+    for n in names:
+        f.write(str(n) + '\n')
+    f.close()
     val_accs = []
     for i in range(k):
         train_names = []
@@ -205,7 +209,7 @@ def cross_validate_method(train_fn, params):
 
 # In[ ]:
 
-
+# NN
 for use_batch_norm in [True, False]:
     for use_dropout in [True, False]:
         for layers in [6, 12]:
@@ -233,3 +237,29 @@ for use_batch_norm in [True, False]:
                 f.write('model size: ' + str(size) + '\n')
                 f.close()
 
+# SVM
+def train_svm(params, suffix, train_X, train_Y, test_X, test_Y):
+    C = params['C']
+    kernel = params['kernel']
+    model = SVC(gamma='scale', probability=True, C=C, kernel=kernel)
+    print("Params C:", C, "kernel:", kernel)
+    model.fit(train_X, train_Y)
+    print("Train score", model.score(train_X, train_Y))
+    test_score = model.score(test_X, test_Y)
+    print("Test score", test_score)
+    return test_score, None
+
+# SVM 
+Cs = [0.1, 1, 10, 100, 1000]
+# kernels = ['poly', 'rbf', 'sigmoid']
+kernels = ['rbf']
+
+scores = []
+for C in Cs:
+    for kernel in kernels:
+        params = {
+            'C': C,
+            'kernel': kernel,
+        }
+        val_acc, size = cross_validate_method(train_svm, params)
+        scores.append(test_score)
