@@ -13,6 +13,7 @@ import srt
 import json
 import os
 from pprint import pprint
+import time
 
 import keras
 from keras.models import Model
@@ -56,7 +57,7 @@ def write_features_to_file(features, fwrite):
       fwrite.write(line)
 
 
-# In[4]:
+# In[9]:
 
 
 def get_cnn_features_from_video(video_filename, cnn_feat_filename, model, interval):
@@ -75,21 +76,11 @@ def get_cnn_features_from_video(video_filename, cnn_feat_filename, model, interv
       x = preprocess_input(x)
       xs.append(x[0])
 
-      if len(xs) == 256:
-        # Predict for batch of 256
-        xs = np.array(xs)
-        preds = model.predict(xs)
-        preds = preds.reshape((preds.shape[0],-1))
-        write_features_to_file(preds, fwrite)
-        xs = []
-        processed += 256
-        print("Processed", processed * 10, "frames")
-
-    # For last images
     xs = np.array(xs)
     if xs.shape[0] == 0:
       return
-    preds = model.predict(xs)
+
+    preds = model.predict(xs, batch_size=32)
     preds = preds.reshape((preds.shape[0],-1))
     write_features_to_file(preds, fwrite)
 
@@ -134,7 +125,7 @@ def get_scene_label_from_video(video_filename, label_filename, frame_stamps, int
             fwrite.write("NULL\n")
 
 
-# In[6]:
+# In[7]:
 
 
 def extract_feat_for_video(name):
@@ -156,13 +147,13 @@ def extract_feat_for_video(name):
     assert(scene_array.shape[0] == cnn_array.shape[0])
 
 
-# In[7]:
+# In[13]:
 
 
-#  extract_feat_for_video("2_Egg_Vs_95_Egg")
+extract_feat_for_video("8_Toast_Vs_20_Toast")
 
 
-# In[9]:
+# In[12]:
 
 
 processed = os.listdir('cnn')
@@ -173,5 +164,8 @@ for label in os.listdir('labels'):
         continue
         
     print(name)
+    start = time.time()
     extract_feat_for_video(name)
+    end = time.time()
+    print("Total time:", end - start)
 

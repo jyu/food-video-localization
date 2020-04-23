@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[65]:
+# In[3]:
 
 
 from pytube import YouTube
@@ -10,18 +10,13 @@ import cv2
 from matplotlib import pyplot as plt
 import numpy as np
 from PIL import Image
-import srt
 import json
 
-import keras
-from keras.preprocessing import image
-from keras.applications.resnet50 import ResNet50, preprocess_input, decode_predictions
+
+# In[108]:
 
 
-# In[195]:
-
-
-url = "https://www.youtube.com/watch?v=6naWCw5LSPc"
+url = "https://www.youtube.com/watch?v=xj-6hC5GFfI"
 yt = YouTube(url)
 
 stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
@@ -38,7 +33,7 @@ path = stream.download(output_path="data", filename=name)
 name = path.split("/")[-1].replace(".mp4", "")
 
 
-# In[90]:
+# In[5]:
 
 
 # Timestamps are "min:sec"
@@ -49,37 +44,39 @@ def timeStampToFrame(timestamp, fps):
     return frame
 
 
-# In[201]:
+# In[21]:
 
 
-timestamps = [("0:16", "intro"), 
-              ("1:04", "transition"),
-              ("4:16", "scene"),
-              ("5:37", "transition"),
-              ("10:02", "scene"),
-              ("10:56", "transition"),
-              ("14:49", "scene")
+# Format of timestamps are end of scene
+
+timestamps = [("0:00", "intro"), 
+              ("1:01", "transition"),
+              ("3:59", "scene"),
+              ("6:22", "transition"),
+              ("10:11", "scene"),
+              ("11:14", "transition"),
+              ("15:38", "scene")
              ]
-name = "$13 BBQ Ribs Vs. $256 BBQ Ribs • Korea"
-name = name.replace(" ", "_").replace("$","").replace(".","")
-print(name)
 
 
-# In[202]:
+# In[109]:
 
 
+cap = cv2.VideoCapture('data/' + name + '.mp4')
 fps = cap.get(cv2.CAP_PROP_FPS)
 print("fps", fps)
 # Format of timestamps are end of scene
-timestamps = [("0:16", "intro"), 
-              ("1:04", "transition"),
-              ("4:16", "scene"),
-              ("5:37", "transition"),
-              ("10:02", "scene"),
-              ("10:56", "transition"),
-              ("14:49", "scene")
-             ]
 
+# Format of timestamps are end of scene
+
+timestamps = [("0:00", "intro"), 
+              ("1:01", "transition"),
+              ("3:59", "scene"),
+              ("6:22", "transition"),
+              ("10:11", "scene"),
+              ("11:14", "transition"),
+              ("15:38", "scene")
+             ]
 frame_stamps = []
 
 # Save tuple of timestamp index, frame to save
@@ -105,7 +102,7 @@ for i in range(len(timestamps)):
 print("frame stamps", frame_stamps)
 
 
-# In[203]:
+# In[110]:
 
 
 # We want to verify that the frame boundaries we have are actual scene transitions
@@ -139,7 +136,7 @@ for i in frames_to_view:
         plt.imshow(img)
 
 
-# In[204]:
+# In[111]:
 
 
 # Save results
@@ -156,7 +153,7 @@ with open('labels/' + name + '.json', 'w') as outfile:
     json.dump(label, outfile)
 
 
-# In[205]:
+# In[112]:
 
 
 from pprint import pprint
@@ -165,10 +162,4 @@ json_file = 'labels/' + name + '.json'
 with open(json_file) as json_file:
     data = json.load(json_file)
     pprint(data)
-
-
-# In[ ]:
-
-
-
 
