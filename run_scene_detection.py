@@ -274,6 +274,20 @@ def check_scene_timestamps(timestamps, name):
     return scene_diff, diffs, label_scenes, total_tp, total_fp, total_fn
 
 
+# In[321]:
+
+
+def save_pred_timestamps(name, timestamps, framestamps):
+    f_name = 'labels/' + name + '.json'
+    with open(f_name) as json_file:
+        data = json.load(json_file)
+    data['pred_timestamps'] = timestamps
+    data['pred_framestamps'] = framestamps
+    
+    with open(f_name, 'w') as outfile:
+        json.dump(data, outfile)
+
+
 # In[8]:
 
 
@@ -296,7 +310,7 @@ for i in range(k):
         scene_to_test_acc[t] = test_acc
 
 
-# In[293]:
+# In[320]:
 
 
 all_diffs = []
@@ -314,7 +328,8 @@ for name in names:
 
     transitions = get_scene_transitions(preds, scene_thresh, transition_thresh)
     timestamps, framestamps = get_scene_timestamps(transitions, fps, name)
-
+    save_pred_timestamps(name, timestamps, framestamps)
+    
     scene_diff, diffs, label_scenes, tp, fp, fn = check_scene_timestamps(timestamps, name)
     scene_diffs += scene_diff
     all_diffs += diffs
@@ -325,11 +340,13 @@ for name in names:
         print(name)
         print('test acc', scene_to_test_acc[name])
         print('scene diff', scene_diff)
+        print('pred framestamps', framestamps)
         print('pred scene times', timestamps)
         print('label scene times', label_scenes)
         print('time diff', np.average(np.array(diffs)))
         print('')
-
+        
+    
 
 # print(all_diffs)
 print("total average", sum(all_diffs) / len(all_diffs))
