@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[47]:
+# In[1]:
 
 
 from pytube import YouTube
@@ -12,26 +12,50 @@ import cv2
 import pytesseract 
 from matplotlib import pyplot as plt
 from imutils.object_detection import non_max_suppression
-
+import json
 from PIL import Image
 import numpy as np
+import gc
+import re
+import pycountry
+import os
 
-COLOR_KMEANS = 12
+COLOR_KMEANS = 20
 COLOR_SLACK = 30
 
 
-# In[38]:
+# In[2]:
 
 
-# Timestamps from scene_detection.py
-timestamps = [(61.311249334564614, 233.5666641316747),
- (285.2849969036884, 440.85707854853604),
- (483.3995780868054, 694.8608257917323)]
+# US states
+US_states = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DC", "DE", "FL", "GA", 
+          "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", 
+          "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", 
+          "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", 
+          "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"]
 
-framestamps = [(147, 560), (684, 1057), (1159, 1666)]
+def is_country(s):
+    try:
+        pycountry.countries.search_fuzzy(s)
+        return True
+    except:
+        return False
 
 
-# In[39]:
+# In[3]:
+
+
+# load video names
+f = open('cross_val.txt', 'r')
+names_f = list(f.readlines())
+names = []
+for n in names_f:
+    names.append(n.replace("\n", ""))
+
+f.close()
+
+
+# In[4]:
 
 
 def get_keyframes(video_filename, keyframe_interval):
@@ -51,7 +75,7 @@ def get_keyframes(video_filename, keyframe_interval):
     video_cap.release()
 
 
-# In[44]:
+# In[5]:
 
 
 # From https://nanonets.com/blog/deep-learning-ocr/
@@ -81,6 +105,7 @@ def getEastBoxes(img):
         endY = int(endY * rH)
         box_res.append((startX, startY, endX, endY))
         
+    del image
     return box_res
 
 ## Returns a bounding box and probability score if it is more than minimum confidence
@@ -172,7 +197,11 @@ def combineBoxes(boxes):
                 if not i in combinations:
                     combinations[i] = []
                 combinations[i].append(j)
-
+    
+    # No combinations found, return boxes
+    if len(combinations) == 0:
+        return boxes
+    
     # create a new box for the combination
     res = []
     for comb in combinations:
@@ -229,47 +258,164 @@ def readColorTextFromImage(img, color):
         if t == "":
             continue
         filtered_texts.append(t)
-
+    
+    del hsv, mask, res, img, pil_img
     return filtered_texts
 
-def readTextFromImage(img, filter_fn):
+def readTextFromImage(img, filter_fn, good_colors):
     boxes = getEastBoxes(img)
     
     if len(boxes) == 0:
         return None
+#     print("found east boxes")
     
-    boxes = combineBoxes(boxes)
-    colors = getMainColorsInBoxes(boxes, img)
-    for c in colors:
+    all_texts = []
+    # Try good colors
+    for c in good_colors:
         texts = readColorTextFromImage(img, c)
         if filter_fn(texts):
-            return texts
+            all_texts.append(texts)
+    
+    if len(all_texts) > 0:  
+        print("found with good color")
+        print("all texts", all_texts)
+        return all_texts[0]
+
+    # Find own good color
+    boxes = combineBoxes(boxes)
+#     print("total boxes", len(boxes))
+    colors = getMainColorsInBoxes(boxes, img)
+#     print("total colors", len(colors))
+
+    # Optimization ideas:
+    # dont check colors we've seen before
+    # use colors that worked before
+    
+    completed_colors = [] # colors we tried but don't work
+    i = 0
+    for c in colors:
+        # See if color already tried
+        skip = False
+        for completed in completed_colors:
+            b_dist = abs(completed[0] - c[0])
+            g_dist = abs(completed[1] - c[1])
+            r_dist = abs(completed[2] - c[2])
+            # Threshold for same color
+            if (b_dist + g_dist + r_dist < 20):
+                skip = True
+                break
+        if skip:
+            continue
+            
+        texts = readColorTextFromImage(img, c)
+        if filter_fn(texts):
+            all_texts.append(texts)
+            good_colors.append(c)
+        else:
+            completed_colors.append(c)
+        i += 1
+    print("only ran on", i, "colors instead of", len(colors), "colors") 
+            
+    if len(all_texts) > 0:    
+#         print("all texts", all_texts)
+        return all_texts[0]
+#     print("no color worked")
     return None
     
 
 
-# In[48]:
+# In[7]:
 
 
-frame_gen = get_keyframes('data/2_Egg_Vs_95_Egg.mp4', 10)
-scene_i = 0
-for (img, frame) in frame_gen:
+def isValidLocation(texts):
+#     print('is valid input', texts)
+    if len(texts) < 3:
+        return False
+    
+    # Make it alphanumeric or $
+    loc_1 = re.sub(r'\W+', '', texts[-2])
+    loc_2 = re.sub(r'\W+', '', texts[-1])
+#     print('loc 1', loc_1, 'loc 2', loc_2)
+    if len(loc_1) <= 3 or len(loc_2) <= 3:
+#         print("loc alphanumeric too short")
+        return False
+    
+    last_pos = texts[-1].split(' ')[-1]
+#     print("state pos", state_pos)
+    if last_pos in US_states:
+        print("is a US state, True")
+        return True
+    if is_country(last_pos):
+        print("is a country, True")
+        return True
+    
+    if not "$" in texts[-3:][0]:
+        return False
 
-    # Start of scene
-    if frame / 10 > framestamps[scene_i][0]:
-        text = readTextFromImage(img, lambda x: len(x) >= 3 and "$" in x[-3:][0])
-        if text == None:
+    return True
+
+def getLocationsForVideo(name):
+
+    frame_gen = get_keyframes('data/'+ name + '.mp4', 10)
+    scene_i = 0
+    
+    json_file = 'labels/' + name + '.json'
+    with open(json_file) as json_file:
+        data = json.load(json_file)
+    framestamps = data['pred_framestamps']
+    
+    good_colors = []      # colors that worked
+    out = {
+        'scene_i': [],
+        'frames': [],
+        'locations': [],
+        'raw_locations': [],
+    }
+    for (img, frame) in frame_gen:
+        # Start of scene
+        if frame / 10 > framestamps[scene_i][0]:
+            print(frame, scene_i)
+            text = readTextFromImage(img, isValidLocation, good_colors)
+            if text == None:
+                continue
+            text = text[-2:]
+            out['raw_locations'].append(text)
+
+            text = ', '.join(text).replace(' I ', ' | ').replace(' 1 ', ' | ')
+            print('frame', frame, 'text', text)
+            out['scene_i'].append(scene_i)
+            out['frames'].append(frame)
+            out['locations'].append(text)
+            
+            scene_i += 1
+            if scene_i >= len(framestamps):
+                break
+
+        # End of scene
+        if frame / 10 > framestamps[scene_i][1]:
+            scene_i += 1
+            if scene_i >= len(framestamps):
+                break
             continue
-        text = text[-3:]
-        print('frame', frame, 'text', text)
-        scene_i += 1
-        if scene_i >= len(framestamps):
-            break
         
-    # End of scene
-    if frame / 10 > framestamps[scene_i][1]:
-        scene_i += 1
-        if scene_i >= len(framestamps):
-            break
-        continue
+        del img
+        gc.collect()
+    
+    # Save as json
+    with open('pred_locations/' + name + '.json', 'w') as outfile:
+        json.dump(out, outfile)
+
+
+# In[8]:
+
+
+# skip_list = ['1_Sushi_Vs_133_Sushi_•_Japan']
+# completed = os.listdir('pred_locations')
+# for i in range(len(names)):
+#     n = names[i]
+#     if n in skip_list or if n in completed:
+#         continue
+#     print(i, 'name', n)
+#     getLocationsForVideo(n)
+getLocationsForVideo(names[2])
 
