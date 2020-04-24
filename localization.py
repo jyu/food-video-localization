@@ -19,6 +19,7 @@ import gc
 import re
 import pycountry
 import os
+import time
 
 COLOR_KMEANS = 20
 COLOR_SLACK = 30
@@ -35,6 +36,8 @@ US_states = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DC", "DE", "FL", "GA",
           "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"]
 
 def is_country(s):
+    if len(s) <= 3:
+        return False
     try:
         pycountry.countries.search_fuzzy(s)
         return True
@@ -324,7 +327,7 @@ def readTextFromImage(img, filter_fn, good_colors):
     
 
 
-# In[7]:
+# In[12]:
 
 
 def isValidLocation(texts):
@@ -343,19 +346,33 @@ def isValidLocation(texts):
     last_pos = texts[-1].split(' ')[-1]
 #     print("state pos", state_pos)
     if last_pos in US_states:
-        print("is a US state, True")
+        print(last_pos, "is a US state, True")
         return True
     if is_country(last_pos):
-        print("is a country, True")
+        print(last_pos, "is a country, True")
         return True
     
-    if not "$" in texts[-3:][0]:
-        return False
+    if "$" in texts[-3:][0]:
+        print("$ in ",texts[-3:][0])
+        return True
 
-    return True
+    return False
+
+def postProcessLocation(text):
+    text = ', '.join(text)
+    
+    out_t = ""
+    for i in range(len(text)):
+        t = text[i]
+        if t.isalnum() or t in [' ', ',']:
+            out_t += t
+    text = out_t
+    text = text.replace(' I ', ' | ').replace(' 1 ', ' | ')
+    return text
 
 def getLocationsForVideo(name):
-
+    start = time.time()
+    
     frame_gen = get_keyframes('data/'+ name + '.mp4', 10)
     scene_i = 0
     
@@ -380,8 +397,7 @@ def getLocationsForVideo(name):
                 continue
             text = text[-2:]
             out['raw_locations'].append(text)
-
-            text = ', '.join(text).replace(' I ', ' | ').replace(' 1 ', ' | ')
+            text = postProcessLocation(text)
             print('frame', frame, 'text', text)
             out['scene_i'].append(scene_i)
             out['frames'].append(frame)
@@ -400,22 +416,83 @@ def getLocationsForVideo(name):
         
         del img
         gc.collect()
+        
+        end = time.time()
+        # Stop if run is longer than 10 min
+        print(end - start)
+        if end - start > 60 * 10:
+            print("more than 10 min for one scene, moving on")
+            scene_i += 1
+            if scene_i >= len(framestamps):
+                break
     
     # Save as json
     with open('pred_locations/' + name + '.json', 'w') as outfile:
         json.dump(out, outfile)
 
 
-# In[8]:
+# In[11]:
 
 
-# skip_list = ['1_Sushi_Vs_133_Sushi_•_Japan']
+skip_list = [
+    '10_Cheesesteak_Vs_120_Cheesesteak',
+    '1_Sushi_Vs_133_Sushi_•_Japan', 
+    '4_Burrito_Vs_32_Burrito.json',
+    '350_Fish_Tacos_Vs_30_Fish_Tacos',
+    '13_Korean_Soup_Vs_88_Korean_Soup.json',
+    '11_Salad_Vs_95_Salad.json',
+    '13_Lasagna_Vs_60_Lasagna.json',
+    '10_Sushi_&_Burger_Vs_58_Sushi_&_Burger.json',
+    '050_Dumpling_Vs_29_Dumplings_•_Taiwan', 
+    '350_Soup_Vs_29_Soup_•_Taiwan.json',
+    '3_Chicken_Vs_62_Chicken_•_Taiwan.json',
+    '7_Double_Cheeseburger_Vs_25_Double_Cheeseburger.json',
+    '10_Noodles_Vs_94_Noodles', 
+    '5_Fried_Chicken_Sandwich_Vs_20_Fried_Chicken_Sandwich.json',
+]
+
+# Classifier to preprocess if it is a location scene or not
+# Just run with white color filter to be faster
+completed = os.listdir('pred_locations')
+for i in range(len(names)):
+    n = names[i]
+    if n in skip_list or n + '.json' in completed:
+        continue
+    print(i, 'name', n)
+    getLocationsForVideo(n)
+
+
+# In[9]:
+
+
+# a = {
+#     '7_Secret_Menu_Vs_2500_Secret_Menu.json': {'scene_i': [0, 1, 2], 'frames': [1540, 6570, 12040], 'locations': ['SHAKE SHACK, MIDTOWN | NEW YORK, NY', 'GRAMERCY TAVERN, GRAMERCY PARK | NEW YORK, NY', 'PETROSSIAN , WEST SIDE | NEW YORK, NY'], 'raw_locations': [['SHAKE SHACK', 'MIDTOWN I NEW YORK, NY'], ['GRAMERCY TAVERN', 'GRAMERCY PARK I NEW YORK, NY'], ["PETROSSIAN '", 'WEST SIDE I NEW YORK, NY']]},
+#     '3_Ramen_Vs_79_Ramen_•_Japan.json':{'scene_i': [0, 1, 2], 'frames': [1420, 7110, 12040], 'locations': ['HEDGE, anus', 'TSUTA JAPANESE SOBA NOODLES, SUGAMO TOKYO', 'GENEI TOKYO , ROPPONGL TOKYO'], 'raw_locations': [['HEDGE', 'anus'], ['TSUTA JAPANESE SOBA NOODLES', 'SUGAMO‘ TOKYO'], ['GENEI TOKYO ~~-~—=--..“', 'ROPPONGL TOKYO']]},
+#     '1_Coffee_Vs_914_Coffee_•_Japan.json': {'scene_i': [0, 1, 2], 'frames': [920, 4900, 9460], 'locations': ['ROSTAR, WAKADANOJAUA OKYZ', 'COFFEE ELEMENTARY SCHOOL, DAKANYAMA  TOKYO', 'ﬂ LEE  Lx JJCQU 351UJUS LIJJELva ﬂﬂﬂk WHJB E VCELL 363 A NFL LLVN ASLJAFLEE, L L1 WA'], 'raw_locations': [['R.O.STAR', 'WAKADANO‘JAUA \\OKYZ)'], ['COFFEE ELEMENTARY SCHOOL', 'DA‘KANYAMA [ TOKYO'], ["ﬂ LEE}; ‘>§ Lx J‘JCQ‘U‘ 35””1UJUS’ 'LI‘JJELva‘ ﬂﬂﬂk WH‘JB E VC‘E)‘LL $363 ’A NFL LLVN @A’SL‘JAFLEE", 'L‘" L1 WA']]},
+#     '3_Seafood_Vs_213_Seafood_•_Australia.json': {'scene_i': [0, 1, 2], 'frames': [2170, 7250, 12620], 'locations': ['DOYLES OYSTER BAR aSYDNEY FISH MARKET, PYRMONT, AUSTRALIA', 'RRUS, BARANGAROO, AUSTRALIA', '5 KS  CROWN ENTERTAINMENT COMPLEX, SOUTHBANKKV M LBOURN'], 'raw_locations': [['DOYLE’S OYSTER BAR aSYDNEY FISH MARKET', 'PYRMONT, AUSTRALIA'], ['RRUS', 'BARANGAROO, AUSTRALIA'], ["5' KS @ CROWN ENTERTAINMENT COMPLEX", 'SOUTHBANKKV M :LBOURN:']]}
+# }
+# for f in a:
+#     data = a[f]
+#     with open('pred_locations/' + f, 'w') as outfile:
+#         json.dump(data, outfile)
+
+
+# In[10]:
+
+
+# # Run location post processing again
 # completed = os.listdir('pred_locations')
-# for i in range(len(names)):
-#     n = names[i]
-#     if n in skip_list or if n in completed:
-#         continue
-#     print(i, 'name', n)
-#     getLocationsForVideo(n)
-getLocationsForVideo(names[2])
+# for c in completed:
+#     print(c)
+#     with open('pred_locations/' + c) as json_file:
+#         data = json.load(json_file)
+#     res = []
+#     print(data)
+#     for loc in data['locations']:
+#         print(loc)
+#         res.append(postProcessLocation(loc))
+#     data['locations'] = res
+#     print(data)
+#     with open('pred_locations/' + c, 'w') as outfile:
+#         json.dump(data, outfile)
 
