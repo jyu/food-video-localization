@@ -345,6 +345,19 @@ print("Precision:", total_tp / (total_tp + total_fp))
 print("F1:", 2 * (recall * precision) / (precision + recall))
 
 
+# In[306]:
+
+
+# print(all_diffs)
+import matplotlib.pyplot as plt
+
+fig, axs = plt.subplots(1, 1, sharey=True, tight_layout=True)
+axs.hist(all_diffs, bins=40)
+plt.title('Time difference between predicted and actual scene')
+plt.xlabel('Time difference (s)')
+plt.ylabel('Number of scenes')
+
+
 # In[285]:
 
 
