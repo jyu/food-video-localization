@@ -327,7 +327,7 @@ def readTextFromImage(img, filter_fn, good_colors):
     
 
 
-# In[12]:
+# In[13]:
 
 
 def isValidLocation(texts):
@@ -389,6 +389,16 @@ def getLocationsForVideo(name):
         'raw_locations': [],
     }
     for (img, frame) in frame_gen:
+        gc.collect()
+        
+        end = time.time()
+        # Stop if run is longer than 10 min
+        if end - start > 60 * 10:
+            print("more than 10 min for one scene, moving on")
+            scene_i += 1
+            if scene_i >= len(framestamps):
+                break
+                
         # Start of scene
         if frame / 10 > framestamps[scene_i][0]:
             print(frame, scene_i)
@@ -413,25 +423,13 @@ def getLocationsForVideo(name):
             if scene_i >= len(framestamps):
                 break
             continue
-        
-        del img
-        gc.collect()
-        
-        end = time.time()
-        # Stop if run is longer than 10 min
-        print(end - start)
-        if end - start > 60 * 10:
-            print("more than 10 min for one scene, moving on")
-            scene_i += 1
-            if scene_i >= len(framestamps):
-                break
     
     # Save as json
     with open('pred_locations/' + name + '.json', 'w') as outfile:
         json.dump(out, outfile)
 
 
-# In[11]:
+# In[ ]:
 
 
 skip_list = [

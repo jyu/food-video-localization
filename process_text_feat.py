@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[5]:
 
 
 from pytube import YouTube
@@ -16,11 +16,13 @@ import nltk
 from nltk.tokenize import word_tokenize
 from bert_embedding import BertEmbedding
 import gc
+import mxnet as mx
 
-bert_embedding = BertEmbedding(model='bert_24_1024_16', dataset_name='book_corpus_wiki_en_cased', max_seq_length=100)
+ctx = mx.gpu(0)
+bert_embedding = BertEmbedding(model='bert_24_1024_16', dataset_name='book_corpus_wiki_en_cased', max_seq_length=100, ctx=ctx)
 
 
-# In[2]:
+# In[6]:
 
 
 # load video names
@@ -33,7 +35,7 @@ for n in names_f:
 f.close()
 
 
-# In[10]:
+# In[7]:
 
 
 def write_list_to_file(feat, fwrite):
@@ -53,7 +55,7 @@ def write_features_to_file(features, fwrite):
         fwrite.write(line)
 
 
-# In[4]:
+# In[8]:
 
 
 def get_label_timestamps(name):
@@ -79,16 +81,24 @@ def get_label_timestamps(name):
     return label_scenes
 
 
-# In[5]:
+# In[20]:
 
 
 def get_text_from_url(url, timestamps):
     yt = YouTube(url)
-    caption = yt.caption_tracks[0]
-    print(caption.name) 
-#     print(yt.captions)
-#     print(yt.captions.all())
-#     caption = yt.captions.get_by_language_code('en')
+    print(yt.caption_tracks)
+    caption = None
+    for c in yt.caption_tracks:
+        # We do not want autogen caption
+        if 'auto' in c.name:
+            continue
+        caption = c
+        
+    if caption == None:
+        caption = yt.caption_tracks[0]
+        
+    if 'auto' in caption.name:
+        print("AUTO IN CAPTION NAME")
     
     caption_srt = caption.generate_srt_captions()
     subtitle_generator = srt.parse(caption_srt)
@@ -111,21 +121,21 @@ def get_text_from_url(url, timestamps):
     return timestamp_to_text
 
 
-# In[15]:
+# In[24]:
 
 
 def save_text_from_name(name):
     f = open('labels/' + name + '.json')
-    print("Video name:", name, "\n")
+    print("\nVideo name:", name)
     config = json.load(f)
     f.close()
     timestamps = get_label_timestamps(name)
     timestamps_to_text = get_text_from_url(config['url'], timestamps)
     
     # Init directories
-    os.system('mkdir -p transcripts/' + name)
-    os.system('mkdir -p tokens/' + name)
-    os.system('mkdir -p embeddings/' + name)
+    os.system('mkdir -p "transcripts/' + name + '"')
+    os.system('mkdir -p "tokens/' + name + '"')
+    os.system('mkdir -p "embeddings/' + name + '"')
 
     
     transcripts = []
@@ -133,12 +143,10 @@ def save_text_from_name(name):
         text = timestamps_to_text[i]
         sent_text = nltk.sent_tokenize(text)
         # Test
-        sent_text = [sent_text[0]]
         print("For scene", i, "found ", len(sent_text), "sentences")
         result = bert_embedding.embedding(sent_text, True)
-        print("Got embedding")
         
-        os.system('mkdir -p embeddings/' + name + '/scene_' + str(i))
+        os.system('mkdir -p "embeddings/' + name + '/scene_' + str(i) + '"')
         transcript_f = open('transcripts/' + name + '/scene_' + str(i) + '.txt', 'w')
         token_f = open('tokens/' + name + '/scene_' + str(i) + '.txt', 'w')
         
@@ -148,8 +156,6 @@ def save_text_from_name(name):
             tokens = result[j][0]
             embedding = result[j][1]
             embedding_f = open('embeddings/' + name + '/scene_' + str(i) + '/sentence_' + str(j) + '.feat', 'w')
-
-            print('embedding shape', np.array(embedding).shape)
             
             transcript_f.write(transcript + '\n')
             write_list_to_file(tokens, token_f)
@@ -163,83 +169,34 @@ def save_text_from_name(name):
         gc.collect()
         del text, sent_text, result
         
-# name = '3_Seafood_Vs_213_Seafood_•_Australia'
-name = '7_BBQ_Ribs_Vs_68_BBQ_Ribs'
-save_text_from_name(name)
 
 
-# In[ ]:
+# In[26]:
 
 
-def label_text_from_name(name):
-    f = open('labels/' + name + '.json')
-    print("Video name:", name, "\n")
-    config = json.load(f)
-    f.close()
-    timestamps = get_label_timestamps(name)
-    timestamps_to_text = get_text_from_url(config['url'], timestamps)
-    
-    location = "BigMista's Barbecue and Sammich Shop"
-    s = "(jazz music) - [Neil] Hey guys, my name is Neil Strawder, also known as BigMista, of BigMista's Barbecue and Sammich Shop."
-    # location embedding
-    result = bert_embedding.embedding([location], True)
-    tokens = result[0][0]
-    print('location tokens', tokens, len(tokens))
-
-    print(s,)
-    result = bert_embedding.embedding([s], True)
-    tokens = result[0][0]
-    print('tokens', tokens, len(tokens))
-    print('embedding shape', np.array(result[0][1]).shape)
-    
-#     transcripts = []
-#     for i in timestamps_to_text:
-#         text = timestamps_to_text[i]
-        
-
-#         sent_text = nltk.sent_tokenize(text)
-#         for s in sent_text:
-#             print(s,)
-#             result = bert_embedding.embedding([s], True)
-#             tokens = result[0][0]
-#             print('tokens', tokens, len(tokens))
-#             print('embedding shape', np.array(result[0][1]).shape)
-
-#         print("")
-#         foods = input("Scene foods: ")
-#         for food in foods.split(", "):
-#             f_len = len(food.split(" "))
-#             replace_str = "FOOD_TAG " * f_len
-#             replace_str = replace_str[:-1]
-#             text = text.replace(food, replace_str)
-#         location = input("Location: ")
-#         if location != "":
-#             l_len = len(location.split(" "))
-#             replace_str = "LOCATION_TAG " * l_len
-#             replace_str = replace_str[:-1]
-#             text = text.replace(location, replace_str)
-#         print(text, "\n")
-#         print(word_tokenize(text))
-
-#         print("")
-#         break
-        
-        
-#         g = open('transcripts/' + name + '_' + str(i) + '.txt', 'w')
-#         g.write(timestamps_to_text[i])
-#         g.close()
-
-# name = '3_Seafood_Vs_213_Seafood_•_Australia'
-name = '7_BBQ_Ribs_Vs_68_BBQ_Ribs'
-save_text_from_name(name)
-
-
-# In[13]:
-
+completed = os.listdir('transcripts')
 
 for label in os.listdir('labels'):
     name = label.replace(".json", "")
-    print(name)
+    if name in completed:
+        continue
     save_text_from_name(name)
-    break
+
+
+# In[27]:
+
+
+long = 0
+short = 0
+for label in os.listdir('labels'):
+    name = label.replace(".json", "")
+    f = open('transcripts/' + name + '/scene_0.txt')
+    l = list(f.readlines())
+    if len(l) == 1:
+        short += 1
+    else:
+        long += 1
+        
+print('long:', long)
+print('short:', short)
 
