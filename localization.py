@@ -1,8 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
 
 from pytube import YouTube
 import spacy
@@ -21,12 +16,12 @@ import pycountry
 import os
 import time
 
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+import tensorflow.keras.backend as K
+
 COLOR_KMEANS = 20
 COLOR_SLACK = 30
-
-
-# In[2]:
-
 
 # US states
 US_states = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DC", "DE", "FL", "GA", 
@@ -39,14 +34,14 @@ def is_country(s):
     if len(s) <= 3:
         return False
     try:
-        pycountry.countries.search_fuzzy(s)
-        return True
+        countries = pycountry.countries.search_fuzzy(s)
+        
+        if name == countries[0].name:
+            return True
+        
+        return False
     except:
         return False
-
-
-# In[3]:
-
 
 # load video names
 f = open('cross_val.txt', 'r')
@@ -56,10 +51,6 @@ for n in names_f:
     names.append(n.replace("\n", ""))
 
 f.close()
-
-
-# In[4]:
-
 
 def get_keyframes(video_filename, keyframe_interval):
     "Generator function which returns the next keyframe."
@@ -76,10 +67,6 @@ def get_keyframes(video_filename, keyframe_interval):
         frame += 1
         
     video_cap.release()
-
-
-# In[5]:
-
 
 # From https://nanonets.com/blog/deep-learning-ocr/
 def getEastBoxes(img):
@@ -313,7 +300,7 @@ def readTextFromImage(img, filter_fn, good_colors):
         texts = readColorTextFromImage(img, c)
         if filter_fn(texts):
             all_texts.append(texts)
-            good_colors.append(c)
+#             good_colors.append(c)
         else:
             completed_colors.append(c)
         i += 1
@@ -326,31 +313,70 @@ def readTextFromImage(img, filter_fn, good_colors):
     return None
     
 
+k_recall = tf.keras.metrics.Recall(thresholds=0.5)
+k_precision = tf.keras.metrics.Precision(thresholds=0.5)
 
-# In[13]:
+def f1_m(y_true, y_pred):
+    precision = k_precision(y_true, y_pred)
+    recall = k_recall(y_true, y_pred)
+    return 2*((precision*recall)/(precision+recall+K.epsilon()))
 
+# Models to find the frames with location info
+loc_frame_models = []
+k = 5
+
+for i in range(k):
+    model = load_model('models/text_detection_nn_' + str(i) + '.h5', {'f1_m': f1_m})
+    loc_frame_models.append(model)
+    
+name_to_model_i = {}
+model_i = 0
+batches = len(names) // k
+for i in range(k):
+    for j in range(i * batches, (i + 1) * batches):
+        name_to_model_i[names[j]] = i
+
+# Run model to get only important frames
+def getTextFramesForVideo(name):
+    
+    # Get index of video
+    print('video index', names.index(name), 'model index', name_to_model_i[name])
+    
+    cnn_array = np.genfromtxt('cnn/' + name + '.feat', delimiter=";")
+    found_frames = []
+    model = loc_frame_models[name_to_model_i[name]]
+    res = model.predict(cnn_array)
+    
+    for i in range(res.shape[0]):
+        if res[i] > 0.5:
+            found_frames.append(i * 10)
+    return found_frames
 
 def isValidLocation(texts):
-#     print('is valid input', texts)
+    if len(texts) == 0:
+        return False
+    
+    print('is valid input', texts)
     if len(texts) < 3:
         return False
     
-    # Make it alphanumeric or $
+    # Filter out completely non alphanumeric and not $ strs out
+    
+    # Make it alphanumeric
     loc_1 = re.sub(r'\W+', '', texts[-2])
     loc_2 = re.sub(r'\W+', '', texts[-1])
-#     print('loc 1', loc_1, 'loc 2', loc_2)
     if len(loc_1) <= 3 or len(loc_2) <= 3:
-#         print("loc alphanumeric too short")
         return False
     
-    last_pos = texts[-1].split(' ')[-1]
+#     last_pos = texts[-1].split(' ')[-1]
 #     print("state pos", state_pos)
-    if last_pos in US_states:
-        print(last_pos, "is a US state, True")
-        return True
-    if is_country(last_pos):
-        print(last_pos, "is a country, True")
-        return True
+    for pos in texts[-1].split(' '):
+        if pos in US_states:
+            print(pos, "is a US state, True")
+            return True
+        if is_country(pos):
+            print(pos, "is a country, True")
+            return True
     
     if "$" in texts[-3:][0]:
         print("$ in ",texts[-3:][0])
@@ -364,13 +390,13 @@ def postProcessLocation(text):
     out_t = ""
     for i in range(len(text)):
         t = text[i]
-        if t.isalnum() or t in [' ', ',']:
+        if t.isalnum() or t in [' ', ',', '$']:
             out_t += t
     text = out_t
     text = text.replace(' I ', ' | ').replace(' 1 ', ' | ')
     return text
 
-def getLocationsForVideo(name):
+def getLocationsForVideo(name, check_transition=False):
     start = time.time()
     
     frame_gen = get_keyframes('data/'+ name + '.mp4', 10)
@@ -381,6 +407,9 @@ def getLocationsForVideo(name):
         data = json.load(json_file)
     framestamps = data['pred_framestamps']
     
+    found_frames = getTextFramesForVideo(name)
+    print("found frames", found_frames)
+    
     good_colors = []      # colors that worked
     out = {
         'scene_i': [],
@@ -388,19 +417,25 @@ def getLocationsForVideo(name):
         'locations': [],
         'raw_locations': [],
     }
+    
+    transition_sub = 0
+    if check_transition:
+        transition_sub = 60
+        
     for (img, frame) in frame_gen:
         gc.collect()
         
         end = time.time()
         # Stop if run is longer than 10 min
-        if end - start > 60 * 10:
+        if end - start > 60 * 15:
             print("more than 10 min for one scene, moving on")
             scene_i += 1
+            start = time.time()
             if scene_i >= len(framestamps):
                 break
                 
         # Start of scene
-        if frame / 10 > framestamps[scene_i][0]:
+        if frame / 10 > framestamps[scene_i][0] - transition_sub and frame in found_frames:
             print(frame, scene_i)
             text = readTextFromImage(img, isValidLocation, good_colors)
             if text == None:
@@ -413,9 +448,10 @@ def getLocationsForVideo(name):
             out['frames'].append(frame)
             out['locations'].append(text)
             
-            scene_i += 1
-            if scene_i >= len(framestamps):
-                break
+#             scene_i += 1
+#             start = time.time()
+#             if scene_i >= len(framestamps):
+#                 break
 
         # End of scene
         if frame / 10 > framestamps[scene_i][1]:
@@ -423,14 +459,11 @@ def getLocationsForVideo(name):
             if scene_i >= len(framestamps):
                 break
             continue
-    
+            
+    # TODO: SAVE ALL OUTPUTS FOR IMPORTANT FRAMES FOR ALL FOR OFFLINE PROCESSING
     # Save as json
     with open('pred_locations/' + name + '.json', 'w') as outfile:
         json.dump(out, outfile)
-
-
-# In[ ]:
-
 
 skip_list = [
     '10_Cheesesteak_Vs_120_Cheesesteak',
@@ -460,37 +493,64 @@ for i in range(len(names)):
     getLocationsForVideo(n)
 
 
-# In[9]:
+failed_videos = [
+    '1_Cookie_Vs_90_Cookie.json',
+    '3_Fries_Vs_100_Fries.json',
+    '29_Vs_180_Family-Style_Meats.json',
+    '3_Ramen_Vs_79_Ramen_•_Japan.json',
+    '1_Coffee_Vs_914_Coffee_•_Japan.json',
+    '4_Burger_Vs_777_Burger.json',
+    '2_Egg_Vs_95_Egg.json',
+    '13_BBQ_Ribs_Vs_256_BBQ_Ribs_•_Korea.json',
+    '16_Steak_Vs_150_Steak_•_Australia.json',
+    '7_Pho_Vs_68_Pho.json',
+    '5_Pie_Vs_250_Pie.json',
+    '7_Cake_Vs_208_Cake_•_Japan.json',
+    '3_Seafood_Vs_213_Seafood_•_Australia.json',
+    '3_Mac_N_Cheese_Vs_195_Mac_N_Cheese.json',
+]
+for f in failed_videos:
+    n = f.replace(".json", "")
+    print(n)
+    getLocationsForVideo(n)
 
+skip_list = [
+#     '350_Fish_Tacos_Vs_30_Fish_Tacos',
+#     '10_Cheesesteak_Vs_120_Cheesesteak',
+#     '1_Sushi_Vs_133_Sushi_•_Japan', 
+#     '4_Burrito_Vs_32_Burrito',
+#     '13_Korean_Soup_Vs_88_Korean_Soup',
+#     '11_Salad_Vs_95_Salad',
+#     '13_Lasagna_Vs_60_Lasagna',
+#     '10_Sushi_&_Burger_Vs_58_Sushi_&_Burger',
+#     '050_Dumpling_Vs_29_Dumplings_•_Taiwan', 
+#     '350_Soup_Vs_29_Soup_•_Taiwan',
+    '3_Chicken_Vs_62_Chicken_•_Taiwan',
+    '7_Double_Cheeseburger_Vs_25_Double_Cheeseburger',
+    '10_Noodles_Vs_94_Noodles', 
+    '5_Fried_Chicken_Sandwich_Vs_20_Fried_Chicken_Sandwich',
+]
 
-# a = {
-#     '7_Secret_Menu_Vs_2500_Secret_Menu.json': {'scene_i': [0, 1, 2], 'frames': [1540, 6570, 12040], 'locations': ['SHAKE SHACK, MIDTOWN | NEW YORK, NY', 'GRAMERCY TAVERN, GRAMERCY PARK | NEW YORK, NY', 'PETROSSIAN , WEST SIDE | NEW YORK, NY'], 'raw_locations': [['SHAKE SHACK', 'MIDTOWN I NEW YORK, NY'], ['GRAMERCY TAVERN', 'GRAMERCY PARK I NEW YORK, NY'], ["PETROSSIAN '", 'WEST SIDE I NEW YORK, NY']]},
-#     '3_Ramen_Vs_79_Ramen_•_Japan.json':{'scene_i': [0, 1, 2], 'frames': [1420, 7110, 12040], 'locations': ['HEDGE, anus', 'TSUTA JAPANESE SOBA NOODLES, SUGAMO TOKYO', 'GENEI TOKYO , ROPPONGL TOKYO'], 'raw_locations': [['HEDGE', 'anus'], ['TSUTA JAPANESE SOBA NOODLES', 'SUGAMO‘ TOKYO'], ['GENEI TOKYO ~~-~—=--..“', 'ROPPONGL TOKYO']]},
-#     '1_Coffee_Vs_914_Coffee_•_Japan.json': {'scene_i': [0, 1, 2], 'frames': [920, 4900, 9460], 'locations': ['ROSTAR, WAKADANOJAUA OKYZ', 'COFFEE ELEMENTARY SCHOOL, DAKANYAMA  TOKYO', 'ﬂ LEE  Lx JJCQU 351UJUS LIJJELva ﬂﬂﬂk WHJB E VCELL 363 A NFL LLVN ASLJAFLEE, L L1 WA'], 'raw_locations': [['R.O.STAR', 'WAKADANO‘JAUA \\OKYZ)'], ['COFFEE ELEMENTARY SCHOOL', 'DA‘KANYAMA [ TOKYO'], ["ﬂ LEE}; ‘>§ Lx J‘JCQ‘U‘ 35””1UJUS’ 'LI‘JJELva‘ ﬂﬂﬂk WH‘JB E VC‘E)‘LL $363 ’A NFL LLVN @A’SL‘JAFLEE", 'L‘" L1 WA']]},
-#     '3_Seafood_Vs_213_Seafood_•_Australia.json': {'scene_i': [0, 1, 2], 'frames': [2170, 7250, 12620], 'locations': ['DOYLES OYSTER BAR aSYDNEY FISH MARKET, PYRMONT, AUSTRALIA', 'RRUS, BARANGAROO, AUSTRALIA', '5 KS  CROWN ENTERTAINMENT COMPLEX, SOUTHBANKKV M LBOURN'], 'raw_locations': [['DOYLE’S OYSTER BAR aSYDNEY FISH MARKET', 'PYRMONT, AUSTRALIA'], ['RRUS', 'BARANGAROO, AUSTRALIA'], ["5' KS @ CROWN ENTERTAINMENT COMPLEX", 'SOUTHBANKKV M :LBOURN:']]}
-# }
-# for f in a:
-#     data = a[f]
-#     with open('pred_locations/' + f, 'w') as outfile:
-#         json.dump(data, outfile)
+for n in skip_list:
+    print(n)
+    getLocationsForVideo(n, check_transition=True)
 
+# Run location post processing again
+completed = os.listdir('pred_locations')
+a = 0
+for c in completed:
+    print(c)
+    with open('pred_locations/' + c) as json_file:
+        data = json.load(json_file)
+    res = []
+    for loc in data['locations']:
+        print(loc)
+        loc = loc.replace(",", "").replace("| ", "").replace(" ", "+")
+        print("https://www.google.com/maps/?q=" + loc)
+        a += 1
+    print("")
+print(a)
 
-# In[10]:
-
-
-# # Run location post processing again
-# completed = os.listdir('pred_locations')
-# for c in completed:
-#     print(c)
-#     with open('pred_locations/' + c) as json_file:
-#         data = json.load(json_file)
-#     res = []
-#     print(data)
-#     for loc in data['locations']:
-#         print(loc)
-#         res.append(postProcessLocation(loc))
-#     data['locations'] = res
-#     print(data)
-#     with open('pred_locations/' + c, 'w') as outfile:
-#         json.dump(data, outfile)
-
+wrong = 22
+failed_videos = [
+]
