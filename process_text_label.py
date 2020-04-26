@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[75]:
+# In[1]:
 
 
 from pytube import YouTube
@@ -29,7 +29,7 @@ tag_to_label = {
 bert_embedding = BertEmbedding(model='bert_24_1024_16', dataset_name='book_corpus_wiki_en_cased', max_seq_length=100)
 
 
-# In[76]:
+# In[2]:
 
 
 # load video names
@@ -42,7 +42,7 @@ for n in names_f:
 f.close()
 
 
-# In[79]:
+# In[3]:
 
 
 def token_to_label(t):
@@ -60,12 +60,79 @@ def write_labels_to_file(feat, fwrite):
     fwrite.write(line)
 
 
-# In[82]:
+# In[4]:
 
 
 def label_text_from_name(name):
     print("Video name:", name, "\n")
     
+    f = open('labels/' + name + '.json')
+    data = json.load(f)
+    
+    if 'entity_list' in data:
+        return
+    
+    all_entity_list = []
+    all_entity_tag_list = []
+    
+    for i in range(3):
+        
+        f = open('transcripts/' + name + '/scene_' + str(i) + '.txt')
+        lines = list(f.readlines())
+        if len(lines) == 1:
+            return
+        f.close()
+        
+        # Display text to label
+        for j in range(len(lines)):
+            l = lines[j]
+            print(i, j, l.replace("\n", ""))
+        
+        locations = input("Locations: ")
+        foods = input("Foods: ")
+    
+        location_list = locations.split(', ')
+        food_list = foods.split(', ')
+        entity_list = []
+        entity_tag_list = []
+        for l in location_list:
+            if l == "":
+                continue
+            entity_list.append(l)
+            entity_tag_list.append(LOCATION_TAG)
+        for f in food_list:
+            if f == "":
+                continue
+            entity_list.append(f)
+            entity_tag_list.append(FOOD_TAG)
+            
+        all_entity_list.append(entity_list)
+        all_entity_tag_list.append(entity_tag_list)
+        
+    data['entity_list'] = all_entity_list
+    data['entity_tag_list'] = all_entity_tag_list
+    print(data)
+    
+    with open('labels/' + name + '.json', 'w') as outfile:
+        json.dump(data, outfile)
+
+
+# In[ ]:
+
+
+for label in os.listdir('labels'):
+    name = label.replace(".json", "")
+    print(name)
+    label_text_from_name(name)
+
+
+# In[83]:
+
+
+def label_tokens_from_name(name):
+    print("Video name:", name, "\n")
+    os.system('mkdir -p "token_labels/' + name + '"')
+
     os.system('mkdir -p "token_labels/' + name + '"')
     
     for i in range(3):
