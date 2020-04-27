@@ -5,9 +5,6 @@
 
 
 from pytube import YouTube
-import spacy
-import srt
-import en_core_web_sm
 import cv2
 import pytesseract 
 from matplotlib import pyplot as plt
@@ -541,6 +538,9 @@ for i in range(len(names)):
     n = names[i]
     if n + '.json' in completed:
         continue
+    start = time.time()
     print(i, 'name', n)
     getAllLocationsForVideo(n)
+    end = time.time()
+    print("total time", end - start)
 
