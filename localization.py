@@ -1,3 +1,8 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
 
 from pytube import YouTube
 import spacy
@@ -23,6 +28,10 @@ import tensorflow.keras.backend as K
 COLOR_KMEANS = 20
 COLOR_SLACK = 30
 
+
+# In[2]:
+
+
 # US states
 US_states = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DC", "DE", "FL", "GA", 
           "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", 
@@ -43,6 +52,10 @@ def is_country(s):
     except:
         return False
 
+
+# In[3]:
+
+
 # load video names
 f = open('cross_val.txt', 'r')
 names_f = list(f.readlines())
@@ -51,6 +64,10 @@ for n in names_f:
     names.append(n.replace("\n", ""))
 
 f.close()
+
+
+# In[4]:
+
 
 def get_keyframes(video_filename, keyframe_interval):
     "Generator function which returns the next keyframe."
@@ -67,6 +84,10 @@ def get_keyframes(video_filename, keyframe_interval):
         frame += 1
         
     video_cap.release()
+
+
+# In[ ]:
+
 
 # From https://nanonets.com/blog/deep-learning-ocr/
 def getEastBoxes(img):
@@ -257,7 +278,6 @@ def readTextFromImage(img, filter_fn, good_colors):
     
     if len(boxes) == 0:
         return None
-#     print("found east boxes")
     
     all_texts = []
     # Try good colors
@@ -273,13 +293,8 @@ def readTextFromImage(img, filter_fn, good_colors):
 
     # Find own good color
     boxes = combineBoxes(boxes)
-#     print("total boxes", len(boxes))
     colors = getMainColorsInBoxes(boxes, img)
-#     print("total colors", len(colors))
 
-    # Optimization ideas:
-    # dont check colors we've seen before
-    # use colors that worked before
     
     completed_colors = [] # colors we tried but don't work
     i = 0
@@ -307,11 +322,31 @@ def readTextFromImage(img, filter_fn, good_colors):
     print("only ran on", i, "colors instead of", len(colors), "colors") 
             
     if len(all_texts) > 0:    
-#         print("all texts", all_texts)
         return all_texts[0]
-#     print("no color worked")
     return None
+
+def readAllTextFromImage(img):
+    boxes = getEastBoxes(img)
     
+    if len(boxes) == 0:
+        return []
+    
+    all_texts = []
+
+    # Find own good color
+    boxes = combineBoxes(boxes)
+    colors = getMainColorsInBoxes(boxes, img)
+    
+    for c in colors:
+        texts = readColorTextFromImage(img, c)
+        if len(texts) != 0:
+            all_texts.append(texts)
+
+    return all_texts
+
+
+# In[6]:
+
 
 k_recall = tf.keras.metrics.Recall(thresholds=0.5)
 k_precision = tf.keras.metrics.Precision(thresholds=0.5)
@@ -336,6 +371,10 @@ for i in range(k):
     for j in range(i * batches, (i + 1) * batches):
         name_to_model_i[names[j]] = i
 
+
+# In[7]:
+
+
 # Run model to get only important frames
 def getTextFramesForVideo(name):
     
@@ -351,6 +390,10 @@ def getTextFramesForVideo(name):
         if res[i] > 0.5:
             found_frames.append(i * 10)
     return found_frames
+
+
+# In[59]:
+
 
 def isValidLocation(texts):
     if len(texts) == 0:
@@ -448,11 +491,6 @@ def getLocationsForVideo(name, check_transition=False):
             out['frames'].append(frame)
             out['locations'].append(text)
             
-#             scene_i += 1
-#             start = time.time()
-#             if scene_i >= len(framestamps):
-#                 break
-
         # End of scene
         if frame / 10 > framestamps[scene_i][1]:
             scene_i += 1
@@ -465,92 +503,44 @@ def getLocationsForVideo(name, check_transition=False):
     with open('pred_locations/' + name + '.json', 'w') as outfile:
         json.dump(out, outfile)
 
-skip_list = [
-    '10_Cheesesteak_Vs_120_Cheesesteak',
-    '1_Sushi_Vs_133_Sushi_•_Japan', 
-    '4_Burrito_Vs_32_Burrito.json',
-    '350_Fish_Tacos_Vs_30_Fish_Tacos',
-    '13_Korean_Soup_Vs_88_Korean_Soup',
-    '11_Salad_Vs_95_Salad',
-    '13_Lasagna_Vs_60_Lasagna',
-    '10_Sushi_&_Burger_Vs_58_Sushi_&_Burger',
-    '050_Dumpling_Vs_29_Dumplings_•_Taiwan', 
-    '350_Soup_Vs_29_Soup_•_Taiwan',
-    '3_Chicken_Vs_62_Chicken_•_Taiwan',
-    '7_Double_Cheeseburger_Vs_25_Double_Cheeseburger',
-    '10_Noodles_Vs_94_Noodles', 
-    '5_Fried_Chicken_Sandwich_Vs_20_Fried_Chicken_Sandwich',
-]
 
-# Classifier to preprocess if it is a location scene or not
-# Just run with white color filter to be faster
-completed = os.listdir('pred_locations')
+# In[10]:
+
+
+# Save all the location outputs for offline processing, no filtering
+def getAllLocationsForVideo(name, check_transition=False):
+    start = time.time()
+    
+    frame_gen = get_keyframes('data/'+ name + '.mp4', 10)
+    scene_i = 0
+        
+    found_frames = getTextFramesForVideo(name)
+    print("found frames", found_frames)
+    
+    out = {}   
+    for (img, frame) in frame_gen:
+        gc.collect()
+                        
+        # Start of scene
+        if frame in found_frames:
+            print(frame)
+            all_texts = readAllTextFromImage(img)      
+            out[frame] = all_texts
+            
+    # Save as json
+    with open('all_pred_locations/' + name + '.json', 'w') as outfile:
+        json.dump(out, outfile)
+
+
+# In[ ]:
+
+
+completed = os.listdir('all_pred_locations')
+
 for i in range(len(names)):
     n = names[i]
-    if n in skip_list or n + '.json' in completed:
+    if n + '.json' in completed:
         continue
     print(i, 'name', n)
-    getLocationsForVideo(n)
+    getAllLocationsForVideo(n)
 
-
-failed_videos = [
-    '1_Cookie_Vs_90_Cookie.json',
-    '3_Fries_Vs_100_Fries.json',
-    '29_Vs_180_Family-Style_Meats.json',
-    '3_Ramen_Vs_79_Ramen_•_Japan.json',
-    '1_Coffee_Vs_914_Coffee_•_Japan.json',
-    '4_Burger_Vs_777_Burger.json',
-    '2_Egg_Vs_95_Egg.json',
-    '13_BBQ_Ribs_Vs_256_BBQ_Ribs_•_Korea.json',
-    '16_Steak_Vs_150_Steak_•_Australia.json',
-    '7_Pho_Vs_68_Pho.json',
-    '5_Pie_Vs_250_Pie.json',
-    '7_Cake_Vs_208_Cake_•_Japan.json',
-    '3_Seafood_Vs_213_Seafood_•_Australia.json',
-    '3_Mac_N_Cheese_Vs_195_Mac_N_Cheese.json',
-]
-for f in failed_videos:
-    n = f.replace(".json", "")
-    print(n)
-    getLocationsForVideo(n)
-
-skip_list = [
-#     '350_Fish_Tacos_Vs_30_Fish_Tacos',
-#     '10_Cheesesteak_Vs_120_Cheesesteak',
-#     '1_Sushi_Vs_133_Sushi_•_Japan', 
-#     '4_Burrito_Vs_32_Burrito',
-#     '13_Korean_Soup_Vs_88_Korean_Soup',
-#     '11_Salad_Vs_95_Salad',
-#     '13_Lasagna_Vs_60_Lasagna',
-#     '10_Sushi_&_Burger_Vs_58_Sushi_&_Burger',
-#     '050_Dumpling_Vs_29_Dumplings_•_Taiwan', 
-#     '350_Soup_Vs_29_Soup_•_Taiwan',
-    '3_Chicken_Vs_62_Chicken_•_Taiwan',
-    '7_Double_Cheeseburger_Vs_25_Double_Cheeseburger',
-    '10_Noodles_Vs_94_Noodles', 
-    '5_Fried_Chicken_Sandwich_Vs_20_Fried_Chicken_Sandwich',
-]
-
-for n in skip_list:
-    print(n)
-    getLocationsForVideo(n, check_transition=True)
-
-# Run location post processing again
-completed = os.listdir('pred_locations')
-a = 0
-for c in completed:
-    print(c)
-    with open('pred_locations/' + c) as json_file:
-        data = json.load(json_file)
-    res = []
-    for loc in data['locations']:
-        print(loc)
-        loc = loc.replace(",", "").replace("| ", "").replace(" ", "+")
-        print("https://www.google.com/maps/?q=" + loc)
-        a += 1
-    print("")
-print(a)
-
-wrong = 22
-failed_videos = [
-]
