@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[3]:
 
 
 from pytube import YouTube
@@ -15,6 +15,7 @@ import os
 import nltk
 import gc
 from bert_embedding import BertEmbedding
+import mxnet as mx
 
 NONE_TAG = "NONE_TAG"          # 0
 LOCATION_TAG = "LOCATION_TAG"  # 1
@@ -25,11 +26,11 @@ tag_to_label = {
     LOCATION_TAG: 1,
     FOOD_TAG: 2,
 }
+ctx = mx.gpu(0)
+bert_embedding = BertEmbedding(model='bert_24_1024_16', dataset_name='book_corpus_wiki_en_cased', max_seq_length=100,  ctx=ctx)
 
-bert_embedding = BertEmbedding(model='bert_24_1024_16', dataset_name='book_corpus_wiki_en_cased', max_seq_length=100)
 
-
-# In[2]:
+# In[4]:
 
 
 # load video names
@@ -42,7 +43,7 @@ for n in names_f:
 f.close()
 
 
-# In[3]:
+# In[5]:
 
 
 def token_to_label(t):
@@ -60,7 +61,7 @@ def write_labels_to_file(feat, fwrite):
     fwrite.write(line)
 
 
-# In[4]:
+# In[6]:
 
 
 def label_text_from_name(name):
@@ -117,7 +118,7 @@ def label_text_from_name(name):
         json.dump(data, outfile)
 
 
-# In[ ]:
+# In[7]:
 
 
 for label in os.listdir('labels'):
@@ -126,15 +127,22 @@ for label in os.listdir('labels'):
     label_text_from_name(name)
 
 
-# In[83]:
+# In[18]:
 
 
 def label_tokens_from_name(name):
     print("Video name:", name, "\n")
     os.system('mkdir -p "token_labels/' + name + '"')
-
-    os.system('mkdir -p "token_labels/' + name + '"')
     
+    f = open('labels/' + name + '.json')
+    data = json.load(f)  
+    if not 'entity_list' in data:
+        return
+    
+    all_entity_list = data['entity_list']
+    all_entity_tag_list = data['entity_tag_list']
+    f.close()
+        
     for i in range(3):
         
         f = open('transcripts/' + name + '/scene_' + str(i) + '.txt')
@@ -146,23 +154,14 @@ def label_tokens_from_name(name):
         # Display text to label
         for j in range(len(lines)):
             l = lines[j]
-            print(i, j, l.replace("\n", ""))
+#             print(i, j, l.replace("\n", ""))
         
 #         location = input("Location: ")
 #         foods = input("Foods: ")
-
-        locations = "BigMista's Barbecue and Sammich Shop"
-        foods = "Texas style barbecue, spare ribs"
-        location_list = locations.split(', ')
-        food_list = foods.split(', ')
-        entity_list = []
-        entity_tag_list = []
-        for l in location_list:
-            entity_list.append(l)
-            entity_tag_list.append(LOCATION_TAG)
-        for f in food_list:
-            entity_list.append(f)
-            entity_tag_list.append(FOOD_TAG)
+        
+        entity_list = all_entity_list[i]
+        entity_tag_list = all_entity_tag_list[i]
+#         print(entity_list)
         
         # Get entities so we can tokenize
         result = bert_embedding.embedding(entity_list, True)
@@ -181,7 +180,7 @@ def label_tokens_from_name(name):
         for entity_i in range(len(entity_list)):
             
             entity_tokens = result[entity_i][0]
-            print('entity tokens', entity_tokens, len(entity_tokens))
+#             print('entity tokens', entity_tokens, len(entity_tokens))
             
             for sent_token_i in range(len(scene_token_list)):
                 
@@ -196,7 +195,7 @@ def label_tokens_from_name(name):
                         same = same and entity_tokens[l] == sent_tokens[k + l]
 
                     if same:
-                        print("SAME ENTITY", k)
+#                         print("SAME ENTITY", k)
                         entity_start = k
 
                 # We founda location to replace
@@ -206,25 +205,18 @@ def label_tokens_from_name(name):
                     # Write back sent tokens
                     scene_token_list[sent_token_i] = sent_tokens
                     
-        print(scene_token_list)
+#         print(scene_token_list)
         
         token_label_f = open('token_labels/' + name + '/scene_' + str(i) + '.txt', 'w')
         for sent_tokens in scene_token_list:
             write_labels_to_file(sent_tokens, token_label_f)
 
-        break
 
-# for n in names:
-n = '7_BBQ_Ribs_Vs_68_BBQ_Ribs'
-label_text_from_name(n)
-
-
-# In[13]:
+# In[19]:
 
 
 for label in os.listdir('labels'):
     name = label.replace(".json", "")
     print(name)
-    save_text_from_name(name)
-    break
+    label_tokens_from_name(name)
 
