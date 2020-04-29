@@ -29,6 +29,12 @@ f.close()
 print(names)
 
 
+# In[108]:
+
+
+print(len(names))
+
+
 # In[3]:
 
 
@@ -175,7 +181,7 @@ for name in names:
         print(str(i) + '/' + str(len(names)))
 
 
-# In[105]:
+# In[167]:
 
 
 def test_NER(nlp, test_data):
@@ -216,10 +222,16 @@ def test_NER(nlp, test_data):
                     fp_loc += 1
     
     loc_recall = tp_loc / (total_loc)
-    loc_precision = tp_loc / (tp_loc + fp_loc)
+    if tp_loc + fp_loc == 0:
+        loc_precision = 0
+    else:
+        loc_precision = tp_loc / (tp_loc + fp_loc)
+        
     food_recall = tp_food / (total_food)
-    food_precision = tp_food / (tp_food + fp_food)
-
+    if tp_food + fp_food == 0:
+        food_precision = 0
+    else:
+        food_precision = tp_food / (tp_food + fp_food)
     
     print('loc recall', loc_recall)   
     print('loc precision', loc_precision)    
@@ -236,18 +248,22 @@ def test_NER(nlp, test_data):
         food_f1 = 0
     else:
         food_f1 = 2 * (food_precision * food_recall) / (food_precision + food_recall)
-    return (loc_f1 + food_f1) / 2
+    return loc_recall, food_f1
 
 # nlp = spacy.load('models/ner_0')
 # test_NER(nlp, test_data)
 
 
-# In[103]:
+# In[173]:
 
 
 def train_NER(model=None, train_data=[], test_data=[], new_model_name="spacy_ner", output_dir=None, n_iter=30):
     """Set up the pipeline and entity recognizer, and train the new entity."""
     print("Train on ", len(train_data), "Test on ", len(test_data))
+    
+    loc_output_dir = output_dir+"_loc"
+    food_output_dir = output_dir+"_food"
+ 
     random.seed(0)
     if model is not None:
         nlp = spacy.load(model)  # load existing spaCy model
@@ -276,7 +292,8 @@ def train_NER(model=None, train_data=[], test_data=[], new_model_name="spacy_ner
     pipe_exceptions = ["ner", "trf_wordpiecer", "trf_tok2vec"]
     other_pipes = [pipe for pipe in nlp.pipe_names if pipe not in pipe_exceptions]
     
-    max_f1 = None
+    max_loc = None
+    max_food = None
 
     with nlp.disable_pipes(*other_pipes):  # only train NER
         sizes = compounding(1.0, 4.0, 1.001)
@@ -294,52 +311,40 @@ def train_NER(model=None, train_data=[], test_data=[], new_model_name="spacy_ner
             
             # Test
             print("Itn", itn, "Train loss:", losses['ner'])
-            avg_f1 = test_NER(nlp, test_data)
-            print("Average test f1:", avg_f1)
-#             random.shuffle(test_data)
-#             test_losses = {}
-#             texts, annotations = zip(*test_data)
-#             nlp.update(texts, annotations, sgd=None, losses=test_losses)
+            loc, food = test_NER(nlp, test_data)
+            print("Average test val loc recall:", loc, "val food f1", food)
             
-#             print("Itn", itn, "Train loss:", losses['ner'], "Test loss:", test_losses['ner'])
-
-            if max_f1 == None or avg_f1 > max_f1:
-                max_f1 = avg_f1
+            if max_loc == None or loc > max_loc:
+                max_loc = loc
                 if output_dir is not None:
-                    output_dir = Path(output_dir)
+                    output_dir = Path(loc_output_dir)
                     if not output_dir.exists():
                         output_dir.mkdir()
                     nlp.meta["name"] = new_model_name  # rename model
                     nlp.to_disk(output_dir)
-                    print("Found best avg_f1", avg_f1, 'saving model to', output_dir)
-                
-    # test the trained model
-#     test_text = "Do you like horses?"
-#     doc = nlp(test_text)
-#     print("Entities in '%s'" % test_text)
-#     for ent in doc.ents:
-#         print(ent.label_, ent.text)
-
+                    print("Found best val loc recall", loc, 'saving model to', output_dir)
+                    
+            if max_food == None or food > max_food:
+                max_food = food
+                if output_dir is not None:
+                    output_dir = Path(food_output_dir)
+                    if not output_dir.exists():
+                        output_dir.mkdir()
+                    nlp.meta["name"] = new_model_name  # rename model
+                    nlp.to_disk(output_dir)
+                    print("Found best val food f1", food, 'saving model to', output_dir) 
+                    
     # save model to output directory
     if output_dir is not None:
-#         output_dir = Path(output_dir)
-#         if not output_dir.exists():
-#             output_dir.mkdir()
-#         nlp.meta["name"] = new_model_name  # rename model
-#         nlp.to_disk(output_dir)
-#         print("Saved model to", output_dir)
 
         # test the saved model
         print("Loading from", output_dir)
         nlp2 = spacy.load(output_dir)
         # Check the classes have loaded back consistently
         assert nlp2.get_pipe("ner").move_names == move_names
-#         doc2 = nlp2(test_text)
-#         for ent in doc2.ents:
-#             print(ent.label_, ent.text)
 
 
-# In[ ]:
+# In[174]:
 
 
 # Cross val
@@ -364,8 +369,161 @@ for i in range(k):
         
     test_data = []
     for test_name in test_names:
-        data = video_to_data[train_name]
+        data = video_to_data[test_name]
         test_data += data
         del data
     train_NER(train_data=train_data,test_data=test_data, output_dir="models/ner" + str(i))
+
+
+# In[156]:
+
+
+def eval_NER(nlp, test_data):
+#     print(len(test_data))
+    total_loc = 0
+    total_food = 0
+    tp_loc = 0
+    tp_food = 0
+    fp_loc = 0
+    fp_food = 0
+    for example in test_data:
+        sent = example[0]
+        labels = example[1]['entities']
+        food_ents = []
+        loc_ents = []
+        for l in labels:
+            if l[2] == 'FOOD_TAG':
+                food_ents.append(sent[l[0]:l[1]])
+                total_food += 1
+            if l[2] == 'LOCATION_TAG':
+                loc_ents.append(sent[l[0]:l[1]]) 
+                total_loc += 1
+        
+#         print(loc_ents)
+#         print(food_ents)
+        doc = nlp(sent)
+        for ent in doc.ents:
+#             print(ent.label_, ent.text)
+            if ent.label_ == 'FOOD_TAG':
+                if ent.text in food_ents:
+                    tp_food += 1
+                else:
+                    fp_food += 1
+            if ent.label_ == 'LOCATION_TAG':
+                if ent.text in loc_ents:
+                    tp_loc += 1
+                else:
+                    fp_loc += 1
+    
+    return tp_loc, fp_loc, total_loc, tp_food, fp_food, total_food
+
+# nlp = spacy.load('models/ner' + str(0))
+# for name in ['1_Sushi_Vs_133_Sushi_•_Japan', '5_Pie_Vs_250_Pie', '350_Soup_Vs_29_Soup_•_Taiwan', '1_Bagel_vs_1000_Bagel', '8_Toast_Vs_20_Toast', '9_Fish_Vs_140_Fish', '1_Cookie_Vs_90_Cookie', '10_Noodles_Vs_94_Noodles', '11_Salad_Vs_95_Salad']:
+#     data = video_to_data[name]
+#     print(eval_NER(nlp, data))
+
+# test_data = []
+
+
+# In[175]:
+
+
+# Evaluate results
+k = 5
+batches = len(names) // k
+all_tp_loc, all_fp_loc, all_total_loc, all_tp_food, all_fp_food, all_total_food = 0,0,0,0,0,0
+for i in range(k):
+    train_names = []
+    test_names = []
+    for j in range(i * batches, (i + 1) * batches):
+        test_names.append(names[j])
+    for name in names:
+        if not name in test_names:
+            train_names.append(name)
+            
+    test_data = []
+    for test_name in test_names:
+        data = video_to_data[test_name]
+        test_data += data
+        del data
+    print(test_names)
+    print(len(test_data))
+    food_nlp = spacy.load('models/ner' + str(i) + '_food')
+    loc_nlp = spacy.load('models/ner' + str(i) + '_loc')
+
+    tp_loc, fp_loc, total_loc, _, _, _ = eval_NER(loc_nlp, test_data)
+    _, _, _, tp_food, fp_food, total_food = eval_NER(food_nlp, test_data)
+
+    print(tp_loc, fp_loc, total_loc, tp_food, fp_food, total_food)
+    all_tp_loc += tp_loc
+    all_fp_loc += fp_loc
+    all_total_loc += total_loc
+    all_tp_food += tp_food
+    all_fp_food += tp_food
+    all_total_food += total_food
+    
+print("Loc recall:", all_tp_loc / (all_total_loc))
+print("Loc precision:", all_tp_loc / (all_tp_loc + all_fp_loc))
+print("Food recall:", all_tp_food / (all_total_food))
+print("Food precision:", all_tp_food / (all_tp_food + all_fp_food))
+
+
+# In[186]:
+
+
+def save_NER(food_nlp, loc_nlp, name):
+    with open('labels/' + name + '.json') as json_file:
+        label_data = json.load(json_file)
+    res = {}
+    for scene_i in range(3):
+        data = []
+
+        f = open('transcripts/' + name + '/scene_' + str(scene_i) + '.txt')
+        lines = list(f.readlines())
+        lines = lines[:20]
+        for line in lines:
+            line = line.replace("\n", "")
+            line = filter_line(line)
+            data.append(line)
+    
+        locations = []
+        foods = []
+        for line in data:
+            doc = food_nlp(line)
+            for ent in doc.ents:
+                if ent.label_ == 'FOOD_TAG':
+                    foods.append(ent.text)
+            
+            doc = loc_nlp(line)
+            for ent in doc.ents:
+                if ent.label_ == 'LOCATION_TAG':
+                    locations.append(ent.text)
+        print(name, scene_i)
+#         print('Foods:', foods)
+        print('Locations:', locations)
+        res[scene_i] = {
+            'foods': foods,
+            'locations': locations
+        }
+#         print("Entity list:", label_data['entity_list'][scene_i])
+#         print("Entity tag list:", label_data['entity_tag_list'][scene_i])
+    with open('cnn_text_preds/' + name + '.json', 'w') as outfile:
+        json.dump(res, outfile)
+
+
+# In[187]:
+
+
+# Save results from NER
+k = 5
+batches = len(names) // k
+for i in range(k):
+    test_names = []
+    for j in range(i * batches, (i + 1) * batches):
+        test_names.append(names[j])
+    food_nlp = spacy.load('models/ner' + str(i) + '_food')
+    loc_nlp = spacy.load('models/ner' + str(i) + '_loc')
+
+    for test_name in test_names:
+        save_NER(food_nlp, loc_nlp, test_name)
 

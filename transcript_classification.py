@@ -1,8 +1,14 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[148]:
+
 
 import os
 import random
 import numpy as np
 import gc
+import json
 
 import tensorflow as tf
 from tensorflow.keras.preprocessing.sequence import pad_sequences
@@ -12,9 +18,16 @@ from tensorflow.keras.layers import Input, LSTM, Dense, TimeDistributed, Dropout
 from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, Callback
 
 
+# In[75]:
+
+
 # Lines of transcript to look at
 NUM_LINES = 5
 BERT_DIM = 1024
+
+
+# In[76]:
+
 
 # load video names
 names = []
@@ -34,6 +47,10 @@ batches = len(names) // k
 #     f.write(str(n) + '\n')
 # f.close()
 
+
+# In[119]:
+
+
 # load video names we stored already
 f = open('text_cross_val.txt', 'r')
 names_f = list(f.readlines())
@@ -43,6 +60,10 @@ for n in names_f:
 
 f.close()
 print(names)
+
+
+# In[78]:
+
 
 # Find the longest sequence
 MAX_LEN = 0
@@ -62,11 +83,19 @@ for name in names:
 print(MAX_LEN)
        
 
+
+# In[85]:
+
+
 MAX_LEN = 40
 
 # TO REDUCE MAX LEN FOR LESS PARAMS
 # - REMOVE STOP WORDS
 # - REMOVE (PERSON NAME) FROM TRANSCRIPTS
+
+
+# In[120]:
+
 
 def loadDataForVideo(name):
     total_loc_count = 0
@@ -124,6 +153,10 @@ def loadDataForVideo(name):
     print("For video", name, "loc count", total_loc_count, "food count", total_food_count, 'total size', len(X))
     return X, Y
 
+
+# In[81]:
+
+
 video_to_data = {}
 i = 0
 for name in names:
@@ -132,6 +165,10 @@ for name in names:
     video_to_data[name] = (X, Y)
     if i % 5 == 0:
         print(str(i) + '/' + str(len(names)))
+
+
+# In[100]:
+
 
 def get_bidirectional_lstm(params, suffix):
     hidden_units = params['hidden_units']
@@ -159,6 +196,9 @@ def get_bidirectional_lstm(params, suffix):
     return model, mc_l, mc_f, model.count_params()
 
 
+# In[107]:
+
+
 class CollectCallback(Callback):
   def on_epoch_end(self, epoch, logs=None):
     gc.collect()
@@ -180,6 +220,10 @@ def train_lstm(params, suffix, train_X, train_Y, test_X, test_Y):
     val_max_food = max(history.history['val_food_recall'])
 
     return val_max_loc, val_max_food, size, model
+
+
+# In[110]:
+
 
 def cross_validate_lstm(params):
     batches = len(names) // k
@@ -258,6 +302,10 @@ def cross_validate_lstm(params):
     val_food = sum(val_foods) / len(val_foods)
     return val_loc, val_food
 
+
+# In[115]:
+
+
 for layers in [3]:
     for h in [64]:
         if h == 32 and layers == 3:
@@ -275,41 +323,171 @@ for layers in [3]:
         f.write('val food: ' + str(val_food) + '\n')
         f.close()
 
+
+# In[112]:
+
+
 print(val_loc, val_food)
 
-model = load_model('models/text_blstm_0.h5')
+
+# In[ ]:
 
 
-def evaluate_model(model, test_X, test_Y):
-    print(test_X.shape, test_Y.shape)
-    out = model.predict(test_X)
-    print(out.shape)
-    loc_count = 0
-    food_count = 0
-    
-    for i in range(540):
-        for s in range(90):
-            pred = np.argmax(test_Y[i][s])
-            if pred == 1:
-                loc_count += 1
-            if pred == 2:
-                food_count += 1
-                
-    print('loc', loc_count, 'food', food_count)
+def load_eval_data(name):
+    total_loc_count = 0
+    total_food_count = 0
+    X = []
+    Y = []
+    for i in range(3):
+#         total_lines = len(os.listdir('embeddings/' + name + '/scene_' + str(i)))
+#         # Load BERT embeddings
+#         for sent_i in range(min(NUM_LINES, total_lines)):
+#             feat = np.genfromtxt('embeddings/' + name + '/scene_' + str(i) + '/sentence_' + str(sent_i) + '.feat', delimiter=";")
+#             X.append(feat)
+            
+        # Load labels
+        f = open('token_labels/' + name + '/scene_' + str(i) + '.txt')
+        lines = list(f.readlines())
+        f.close()
+        
+        # Use first 20 lines
+        lines = lines[:NUM_LINES]
+        for line_i in range(len(lines)):
+            
+            line = lines[line_i]
+            line = line.replace("\n", "")
+            labels = line.split(" ")
+            labels = list(map(lambda x: int(x), labels))
+            
+            loc_count = 0
+            food_count = 0
 
-    loc_count = 0
-    food_count = 0
+            for l in labels:
+                if l == 1:
+                    loc_count += 1
+                    total_loc_count += 1
+                elif l == 2:
+                    food_count += 1
+                    total_food_count += 1
+            
+            # Want to downsample sentences that have no labels
+#             if loc_count == 0 and food_count == 0 and line_i % 5 != 0:
+#                 continue
+            
+            # Padding
+            labels = labels[:MAX_LEN]
+            while len(labels) < MAX_LEN:
+                labels.append(0)
+            
+            Y.append(labels)
+            
+            # Load BERT embeddings
+            feat = np.genfromtxt('embeddings/' + name + '/scene_' + str(i) + '/sentence_' + str(line_i) + '.feat', delimiter=";")
+            X.append(feat)
+
+        
+    print("For video", name, "loc count", total_loc_count, "food count", total_food_count, 'total size', len(X))
+    return X, Y
+
+
+# In[117]:
+
+
+model = load_model('models/location_text_blstm_h64_l_3_0.h5')
+
+
+# In[146]:
+
+
+def evaluate_model(model, name):
+    res = {}
+    for scene_i in range(3):
+        X = []
+        Y = []
+        
+         # Load labels
+        f = open('token_labels/' + name + '/scene_' + str(scene_i) + '.txt')
+        lines = list(f.readlines())
+        f.close()
+        
+        # Use first 20 lines
+        lines = lines[:NUM_LINES]
+        
+        lines = lines[:NUM_LINES]
+        for line_i in range(len(lines)):
+            
+            line = lines[line_i]
+            line = line.replace("\n", "")
+            labels = line.split(" ")
+            labels = list(map(lambda x: int(x), labels))
+            
+            # Padding
+            labels = labels[:MAX_LEN]
+            while len(labels) < MAX_LEN:
+                labels.append(0)
+            
+            Y.append(labels)
+            
+            # Load BERT embeddings
+            feat = np.genfromtxt('embeddings/' + name + '/scene_' + str(scene_i) + '/sentence_' + str(line_i) + '.feat', delimiter=";")
+            X.append(feat)
+        
+        X = pad_sequences(X, maxlen=MAX_LEN)
+        Y = np.array([to_categorical(i, num_classes=3) for i in Y])
+        print('X shape:', X.shape, 'Y shape:', Y.shape)
+        out = model.predict(X)
+        print('Out shape:', out.shape)
+
     
-    for i in range(540):
-        for s in range(90):
-            pred = np.argmax(out[i][s])
-            if pred == 1:
-                loc_count += 1
-            if pred == 2:
-                food_count += 1
-                
-    print('loc', loc_count, 'food', food_count)
     
-#     print(np.sum(out))
+        f = open("tokens/" + name + '/scene_' + str(scene_i) + '.txt')
+        tokens = []
+        for toks in f.readlines():
+            tokens.append(toks.split(' '))
+        locs, foods = [], []
+        for i in range(X.shape[0]):
+            for s in range(X.shape[1]):
+                pred = np.argmax(out[i][s])
+                if s < len(tokens[i]) - 1:
+                    if pred == 1:
+                        locs.append(tokens[i][s])
+                    if pred == 2:
+                        foods.append(tokens[i][s])
+
+        print("Scene i", scene_i)
+        print('Locations:', locs)
+        print('Foods:', foods)
+        res[scene_i] = {
+            'foods': foods,
+            'locations': locs
+        }
+        
+    with open('text_preds/' + name + '.json', 'w') as outfile:
+        json.dump(res, outfile)
     
-evaluate_model(model, test_X, test_Y)
+# evaluate_model(model, '5_Pie_Vs_250_Pie')
+
+
+# In[140]:
+
+
+print(names)
+print(len(names))
+
+
+# In[149]:
+
+
+# Save results from NER
+k = 5
+batches = len(names) // k
+for i in range(k):
+    test_names = []
+    for j in range(i * batches, (i + 1) * batches):
+        test_names.append(names[j])
+        
+    model = load_model('models/location_text_blstm_h64_l_3_' + str(i) + '.h5')
+    for name in test_names:
+        evaluate_model(model, name)
+    
+

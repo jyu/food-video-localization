@@ -8,6 +8,7 @@ import json
 import os
 import pycountry
 import re
+import spacy
 
 
 # In[2]:
@@ -88,7 +89,7 @@ def isValidLocation(texts):
     return False
 
 
-# In[5]:
+# In[6]:
 
 
 def isLooseValidLocation(texts):
@@ -125,7 +126,43 @@ def isLooseValidLocation(texts):
     return False
 
 
-# In[6]:
+# In[7]:
+
+
+def getAudioScore(text, name, scene_i):
+    with open('text_preds/' + name + '.json') as json_file:
+        data = json.load(json_file)
+    audio_locations = data[str(scene_i)]['locations']
+    
+    score = 0
+    for a in audio_locations:
+        a  = a.lower()
+        for t in text:
+            t = t.lower()
+            if a in t:
+                score += 1
+    return score  
+    
+getAudioScore(['’-', 'éIGMISTA’S BARBECUE a. SAMMIcH suop', 'LONG BEACH, CA'], '7_BBQ_Ribs_Vs_68_BBQ_Ribs', 0)
+
+
+# In[25]:
+
+
+def getAudioName(name, scene_i):
+    try:
+        with open('cnn_text_preds/' + name) as json_file:
+            data = json.load(json_file)
+        audio_locations = data[str(scene_i)]['locations']
+        return audio_locations[0]
+#         return ' '.join(audio_locations)  
+    except:
+        return ''
+    
+getAudioName('7_BBQ_Ribs_Vs_68_BBQ_Ribs.json', 0)
+
+
+# In[26]:
 
 
 def processPredLocations(pred, save):
@@ -169,13 +206,34 @@ def processPredLocations(pred, save):
         found = False
         for isValid in [isValidLocation, isLooseValidLocation]:
             for frame in frames:
+                
+#                 max_score = 0
+#                 max_loc = None
+#                 for loc in data[str(frame)]:
+#                     score = getAudioScore(loc, pred.replace(".json", ""), scene_i)
+#                     if score > max_score:
+#                         print(loc, score)
+#                         max_score = score
+#                         max_loc = loc
+                
+#                 loc = max_loc
+#                 if max_score != 0:
+#                     loc = postProcessLocation(loc)
+#                     num_found += 1
+#                     found = True
+#                     print(loc)
+#                     loc = loc.replace(" ", "+")
+#                     print("https://www.google.com/maps/?q=" + loc)
+
                 for loc in data[str(frame)]:
+
                     if isValid(loc):
                         loc = postProcessLocation(loc)
                         num_found += 1
                         found = True
                         
-                        print(loc, isValid)
+                        print(loc)
+                        print(isValid.__name__)
                         loc = loc.replace(" ", "+")
                         print("https://www.google.com/maps/?q=" + loc)
 
@@ -184,10 +242,26 @@ def processPredLocations(pred, save):
                         out['frames'].append(frame)
             
                         break
+                
                 if found:
                     break
             if found:
                 break
+                
+        if not found:
+            loc = getAudioName(pred, scene_i)
+            if loc != "":
+                num_found += 1
+                found = True
+
+                print(loc)
+                print('AUDIO FIND')
+                loc = loc.replace(" ", "+")
+                print("https://www.google.com/maps/?q=" + loc)
+
+                out['locations'].append(loc)
+                out['scene_i'].append(scene_i)
+                out['frames'].append(frame)
    
     print("")
     if save:
@@ -196,7 +270,7 @@ def processPredLocations(pred, save):
     return num_found
 
 
-# In[8]:
+# In[27]:
 
 
 # Run location post processing
@@ -205,4 +279,39 @@ num_found = 0
 for pred in predictions:
     num_found += processPredLocations(pred, True)
 print('num found', num_found)
+
+
+# In[ ]:
+
+
+wrong: 3h
+right: 4
+
+OCR FOUND BAD:
+3_Sushi_Vs_250_Sushi
+scene 0: sushi stop
+
+OCR FOUND NOTHING
+5_Pizza_Vs_135_Pizza.json
+scne 2: Spago, Beverly Hills
+        
+4_Burger_Vs_777_Burger 
+scene 1: Gordon Ramsay BurGR
+
+29_Vs_180_Family-Style_Meats 2
+Locations: ['APL Restaurant']
+    
+3_Fries_Vs_100_Fries 1
+Locations: ['LOV restaurant in Montreal', 'LOV']
+
+
+# In[10]:
+
+
+pred = '3_Sushi_Vs_250_Sushi.json'
+with open('all_pred_locations/' + pred) as json_file:
+    data = json.load(json_file)
+    
+for i in data:
+    print(data[i])
 
